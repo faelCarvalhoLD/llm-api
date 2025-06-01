@@ -1,4 +1,4 @@
-name: Build and Push to ECR
+name: Build and Deploy LLM API to ECR and Server
 
 on:
   push:
@@ -21,6 +21,11 @@ jobs:
     - name: Checkout repositório
       uses: actions/checkout@v4
 
+    - name: Instalar Docker Compose
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y docker-compose-plugin
+
     - name: Configurar credenciais AWS
       uses: aws-actions/configure-aws-credentials@v4
       with:
@@ -36,11 +41,25 @@ jobs:
         echo "API_USERNAME=${API_USERNAME}" >> .env
         echo "API_PASSWORD=${API_PASSWORD}" >> .env
 
-    - name: Build da imagem Docker
+    - name: Build imagem com Docker Compose
       run: |
-        docker build -t llm-api .
+        docker compose build
 
-    - name: Tag e push da imagem para o ECR
+    - name: Tag e push para o ECR
       run: |
         docker tag llm-api:latest $ECR_REPOSITORY:latest
         docker push $ECR_REPOSITORY:latest
+
+    - name: Acessar servidor e atualizar com Docker Compose
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.TARGET_HOST }}
+        username: ${{ secrets.TARGET_USER }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          cd /home/rafael/app
+          echo "API_USERNAME=${{ env.API_USERNAME }}" > .env
+          echo "API_PASSWORD=${{ env.API_PASSWORD }}" >> .env
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ECR_REPOSITORY }}
+          docker compose pull
+          docker compose up -d

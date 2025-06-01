@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  llm-api:
+    build: .
+    image: llm-api:latest
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      MODEL_PATH: /app/hf-models/phi-4
+    volumes:
+      - ./hf-models:/app/hf-models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

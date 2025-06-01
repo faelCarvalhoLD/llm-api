@@ -1,11 +1,20 @@
-from transformers import AutoModelForCausalLM, AutoTokenizer
+import os
 import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
-model_id = "microsoft/phi-4"
+
+model_path = os.getenv("MODEL_PATH", "hf-models/phi-4")
+
+print(f"Carregando modelo de: {model_path}")
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-tokenizer = AutoTokenizer.from_pretrained(model_id)
-model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto", torch_dtype=torch.float16)
+tokenizer = AutoTokenizer.from_pretrained(model_path)
+model = AutoModelForCausalLM.from_pretrained(
+    model_path,
+    device_map="auto",
+    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
+)
 
 def generate_response(prompt: str, max_tokens: int = 256, temperature: float = 0.7) -> str:
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
