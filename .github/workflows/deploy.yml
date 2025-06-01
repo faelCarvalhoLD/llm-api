@@ -27,20 +27,21 @@ jobs:
         curl -SL https://github.com/docker/compose/releases/download/v2.24.4/docker-compose-linux-x86_64 -o ~/.docker/cli-plugins/docker-compose
         chmod +x ~/.docker/cli-plugins/docker-compose
         docker compose version
+
     - name: Configurar credenciais AWS
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
 
     - name: Login no Amazon ECR
       uses: aws-actions/amazon-ecr-login@v2
 
     - name: Gerar arquivo .env
       run: |
-        echo "API_USERNAME=${API_USERNAME}" >> .env
-        echo "API_PASSWORD=${API_PASSWORD}" >> .env
+        echo "API_USERNAME=${{ secrets.API_USERNAME }}" >> .env
+        echo "API_PASSWORD=${{ secrets.API_PASSWORD }}" >> .env
 
     - name: Build imagem com Docker Compose
       run: |
@@ -48,21 +49,20 @@ jobs:
 
     - name: Tag e push para o ECR
       run: |
-        docker tag llm-api:latest $ECR_REPOSITORY:latest
-        docker push $ECR_REPOSITORY:latest
+        docker tag llm-api:latest ${{ secrets.ECR_REPOSITORY }}:latest
+        docker push ${{ secrets.ECR_REPOSITORY }}:latest
 
     - name: Acessar servidor e atualizar com Docker Compose
       uses: appleboy/ssh-action@v1.0.3
       with:
-        host: ${{ env.TARGET_HOST }}
-        username: ${{ env.TARGET_USER }}
-        key: ${{ env.SSH_PRIVATE_KEY }}
-        port: ${{ env.TARGET_PORT }}
-
+        host: ${{ secrets.TARGET_HOST }}
+        username: ${{ secrets.TARGET_USER }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ secrets.TARGET_PORT }}
         script: |
           cd /home/rafael/app
-          echo "API_USERNAME=${{ env.API_USERNAME }}" > .env
-          echo "API_PASSWORD=${{ env.API_PASSWORD }}" >> .env
-          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ECR_REPOSITORY }}
+          echo "API_USERNAME=${{ secrets.API_USERNAME }}" > .env
+          echo "API_PASSWORD=${{ secrets.API_PASSWORD }}" >> .env
+          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REPOSITORY }}
           docker compose pull
           docker compose up -d
