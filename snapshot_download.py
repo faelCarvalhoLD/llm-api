@@ -13,6 +13,10 @@ MODELS = {
     "llama3": {
         "repo_id": "meta-llama/Meta-Llama-3-8B-Instruct",
         "cache_dir": "./hf-models/llama3-8b"
+    },
+    "mistral": {
+        "repo_id": "mistralai/Mistral-7B-Instruct-v0.2",
+        "cache_dir": "./hf-models/mistral-7b"
     }
 }
 
@@ -22,7 +26,7 @@ def main():
         "--model",
         choices=MODELS.keys(),
         required=True,
-        help="Escolha o modelo: phi-4, phi-2, llama3"
+        help="Escolha o modelo: phi-4, phi-2, llama3, mistral"
     )
     args = parser.parse_args()
 
