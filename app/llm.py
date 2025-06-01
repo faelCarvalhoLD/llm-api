@@ -18,5 +18,12 @@ model = AutoModelForCausalLM.from_pretrained(
 
 def generate_response(prompt: str, max_tokens: int = 256, temperature: float = 0.7) -> str:
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
-    output = model.generate(**inputs, max_new_tokens=max_tokens, temperature=temperature)
-    return tokenizer.decode(output[0], skip_special_tokens=True)
+    output = model.generate(
+        **inputs,
+        max_new_tokens=max_tokens,
+        temperature=temperature,
+        do_sample=True,
+        pad_token_id=tokenizer.eos_token_id
+    )
+    generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
+    return generated_text[len(prompt):].strip()
