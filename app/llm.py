@@ -2,12 +2,9 @@ import os
 import logging
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from app.config import setup_logger
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
-)
-logger = logging.getLogger("llm-server")
+logger = setup_logger()
 
 model_path = os.getenv("MODEL_PATH", "hf-models/phi-4")
 logger.info("Carregando modelo de: %s", model_path)
@@ -29,8 +26,13 @@ model = AutoModelForCausalLM.from_pretrained(
 logger.info("Modelo carregado com sucesso.")
 
 def generate_response(prompt: str, max_tokens: int = 256, temperature: float = 0.7) -> str:
-    logger.info("Recebido prompt: %s", prompt)
-    logger.debug("Parâmetros de geração: max_tokens=%d, temperature=%.2f", max_tokens, temperature)
+    logger.info("Recebido prompt", extra={"prompt": prompt})
+    logger.debug("Parâmetros de geração", extra={
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "top_k": 50,
+        "top_p": 0.95
+    })
 
     try:
         inputs = tokenizer(prompt, return_tensors="pt").to(device)
@@ -39,21 +41,24 @@ def generate_response(prompt: str, max_tokens: int = 256, temperature: float = 0
             **inputs,
             max_new_tokens=max_tokens,
             temperature=temperature,
+            top_p=0.95,
+            top_k=50,
             do_sample=True,
-            pad_token_id=tokenizer.pad_token_id
+            pad_token_id=tokenizer.pad_token_id,
+            eos_token_id=tokenizer.eos_token_id
         )
 
-        logger.debug("Tokens gerados: %s", output)
+        logger.debug("Tokens gerados", extra={"token_count": len(output[0])})
 
         full_output = tokenizer.decode(output[0], skip_special_tokens=True)
-        logger.info("Texto completo gerado: %s", full_output)
+        logger.info("Texto completo gerado", extra={"text": full_output})
 
         if full_output.startswith(prompt):
             resposta = full_output[len(prompt):].strip()
         else:
             resposta = full_output.strip()
 
-        logger.info("Resposta final retornada: %s", resposta)
+        logger.info("Resposta final retornada", extra={"resposta": resposta})
         return resposta
 
     except Exception as e:
