@@ -6,22 +6,24 @@ from app.config import setup_logger
 
 logger = setup_logger()
 
-model_path = os.getenv("MODEL_PATH", "hf-models/phi-4")
+model_path = os.getenv("MODEL_PATH", "hf-models/mistral")
 logger.info("Carregando modelo de: %s", model_path)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 logger.info("Dispositivo selecionado: %s", device)
 
-tokenizer = AutoTokenizer.from_pretrained(model_path)
+tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True)
 if tokenizer.pad_token_id is None:
     tokenizer.pad_token = tokenizer.eos_token
     logger.info("pad_token_id não estava definido — configurado como eos_token_id")
 
 model = AutoModelForCausalLM.from_pretrained(
     model_path,
-    device_map="auto" if device == "cuda" else None,
-    torch_dtype=torch.float16 if device == "cuda" else torch.float32
+    device_map="auto",
+    torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+    trust_remote_code=True
 )
+model.eval()
 
 logger.info("Modelo carregado com sucesso.")
 
@@ -35,28 +37,26 @@ def generate_response(prompt: str, max_tokens: int = 256, temperature: float = 0
     })
 
     try:
-        inputs = tokenizer(prompt, return_tensors="pt").to(device)
+        inputs = tokenizer(prompt, return_tensors="pt", padding=True).to(device)
 
-        output = model.generate(
-            **inputs,
-            max_new_tokens=max_tokens,
-            temperature=temperature,
-            top_p=0.95,
-            top_k=50,
-            do_sample=True,
-            pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id
-        )
+        with torch.no_grad():
+            output = model.generate(
+                **inputs,
+                max_new_tokens=max_tokens,
+                temperature=temperature,
+                top_p=0.95,
+                top_k=50,
+                do_sample=True,
+                pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=tokenizer.eos_token_id
+            )
 
         logger.debug("Tokens gerados", extra={"token_count": len(output[0])})
 
-        full_output = tokenizer.decode(output[0], skip_special_tokens=True)
-        logger.info("Texto completo gerado", extra={"text": full_output})
+        generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
+        logger.info("Texto completo gerado", extra={"text": generated_text})
 
-        if full_output.startswith(prompt):
-            resposta = full_output[len(prompt):].strip()
-        else:
-            resposta = full_output.strip()
+        resposta = generated_text.replace(prompt, "").strip()
 
         logger.info("Resposta final retornada", extra={"resposta": resposta})
         return resposta
