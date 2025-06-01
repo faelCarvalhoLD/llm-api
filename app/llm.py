@@ -24,7 +24,7 @@ model = AutoModelForCausalLM.from_pretrained(
     model_path,
     device_map="auto" if device == "cuda" else None,
     torch_dtype=torch.float16 if device == "cuda" else torch.float32
-).to(device)
+)
 
 logger.info("Modelo carregado com sucesso.")
 
