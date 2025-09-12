@@ -17,6 +17,10 @@ MODELS = {
     "mistral": {
         "repo_id": "mistralai/Mistral-7B-Instruct-v0.2",
         "cache_dir": "./hf-models/mistral-7b"
+    },
+    "llama3.1-jp": {  # novo modelo adicionado
+        "repo_id": "MathMuniz/Llama-3.1-8B-finetuned-JP",
+        "cache_dir": "./hf-models/llama3.1-8b-jp"
     }
 }
 
@@ -26,7 +30,7 @@ def main():
         "--model",
         choices=MODELS.keys(),
         required=True,
-        help="Escolha o modelo: phi-4, phi-2, llama3, mistral"
+        help="Escolha o modelo: phi-4, phi-2, llama3, mistral, llama3.1-jp"
     )
     args = parser.parse_args()
 
