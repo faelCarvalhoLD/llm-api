@@ -18,7 +18,7 @@ MODELS = {
         "repo_id": "mistralai/Mistral-7B-Instruct-v0.2",
         "cache_dir": "./hf-models/mistral-7b"
     },
-    "llama3.1-jp": {  # novo modelo adicionado
+    "llama3.1-jp": {
         "repo_id": "MathMuniz/Llama-3.1-8B-finetuned-JP",
         "cache_dir": "./hf-models/llama3.1-8b-jp"
     }
