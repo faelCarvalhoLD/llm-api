@@ -1,92 +1,130 @@
 import os
+import math
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from app.config import setup_logger
 
 logger = setup_logger()
+MODEL_PATH = os.getenv("MODEL_PATH", "hf-models/mistral")
+OFFLOAD_DIR = os.getenv("OFFLOAD_DIR", "./offload")
+DEFAULT_CPU_MEM = os.getenv("MAX_CPU_MEM", "48GiB")
+DEFAULT_GPU0_MEM = os.getenv("MAX_GPU_0_MEM", "20GiB")
 
-model_path = os.getenv("MODEL_PATH", "hf-models/mistral")
-logger.info("Carregando modelo de: %s", model_path)
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
+logger.info("Carregando modelo de: %s", MODEL_PATH)
+cuda_available = torch.cuda.is_available()
+device = "cuda" if cuda_available else "cpu"
 logger.info("Dispositivo selecionado: %s", device)
 
-tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True)
+try:
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+except Exception:
+    pass
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, use_fast=True)
 if tokenizer.pad_token_id is None:
     tokenizer.pad_token = tokenizer.eos_token
     logger.info("pad_token_id não estava definido — configurado como eos_token_id")
 
-# Escolha do dtype
-if device == "cuda" and torch.cuda.is_bf16_supported():
+if cuda_available and torch.cuda.is_bf16_supported():
     dtype = torch.bfloat16
-elif device == "cuda":
+elif cuda_available:
     dtype = torch.float16
 else:
     dtype = torch.float32
+logger.info("dtype selecionado: %s", str(dtype).replace("torch.", ""))
 
-# Configuração de memória para evitar OOM
-max_memory = {}
-if device == "cuda":
-    max_memory["cuda:0"] = "12GiB"  # ajuste conforme sua GPU (8–22GiB)
-max_memory["cpu"] = "48GiB"         # quanto puder reservar
-offload_folder = "./offload"
+max_memory = {"cpu": DEFAULT_CPU_MEM}
+if cuda_available:
+    try:
+        gpu_count = torch.cuda.device_count()
+    except Exception:
+        gpu_count = 0
+    if gpu_count > 0:
+        max_memory[0] = DEFAULT_GPU0_MEM
+        for i in range(1, gpu_count):
+            env_key = f"MAX_GPU_{i}_MEM"
+            if env_key in os.environ:
+                max_memory[i] = os.environ[env_key]
+            else:
+                props = torch.cuda.get_device_properties(i)
+                total_gb = props.total_memory / (1024**3)
+                usable = max(4, math.floor(total_gb * 0.88))
+                max_memory[i] = f"{usable}GiB"
+logger.info("max_memory: %s", max_memory)
 
-try:
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        device_map="auto",
-        torch_dtype=dtype,
-        low_cpu_mem_usage=True,
-        max_memory=max_memory,
-        offload_folder=offload_folder,
-        trust_remote_code=True
-    )
-except RuntimeError as e:
-    logger.warning("Falha ao carregar em GPU, caindo para CPU: %s", str(e))
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        device_map={"": "cpu"},
-        torch_dtype=torch.float32,
-        low_cpu_mem_usage=True,
-        trust_remote_code=True
-    )
+os.makedirs(OFFLOAD_DIR, exist_ok=True)
 
+def _load_model():
+    try:
+        model = AutoModelForCausalLM.from_pretrained(
+            MODEL_PATH,
+            device_map="auto",
+            dtype=dtype,
+            low_cpu_mem_usage=True,
+            max_memory=max_memory,
+            offload_folder=OFFLOAD_DIR,
+            trust_remote_code=True,
+        )
+        logger.info("Modelo carregado com device_map=auto e dtype=%s", str(dtype).replace("torch.", ""))
+        return model
+    except Exception as e:
+        logger.warning("Falha ao carregar em GPU, caindo para CPU: %s", str(e))
+        model = AutoModelForCausalLM.from_pretrained(
+            MODEL_PATH,
+            device_map={"": "cpu"},
+            dtype=torch.float32,
+            low_cpu_mem_usage=True,
+            trust_remote_code=True,
+        )
+        logger.info("Modelo carregado na CPU com float32")
+        return model
+
+model = _load_model()
 model.eval()
 
-# Helper para saber em qual device mandar os inputs
 def _first_device_from_map(m):
-    d = getattr(m, "hf_device_map", None)
-    if not d:
+    dmap = getattr(m, "hf_device_map", None)
+    if not dmap:
         return device
-    for name, dev in d.items():
+    for name, dev in dmap.items():
         if "embed_tokens" in name or "wte" in name:
             return dev
-    return next(iter(d.values()))
+    return next(iter(dmap.values()))
 
 _first_device = _first_device_from_map(model)
 logger.info("Primeiro device para inputs: %s", _first_device)
 
+def _to_device(batch, dev):
+    if isinstance(dev, str):
+        tdev = torch.device(dev)
+    elif isinstance(dev, torch.device):
+        tdev = dev
+    else:
+        tdev = torch.device(str(dev))
+    return {k: v.to(tdev) if hasattr(v, "to") else v for k, v in batch.items()}
+
 def generate_response(prompt: str, max_tokens: int = 256, temperature: float = 0.7) -> str:
-    logger.info("Recebido prompt", extra={"prompt": prompt})
+    logger.info("Recebido prompt", extra={"prompt": prompt[:500] + ("..." if len(prompt) > 500 else "")})
     try:
         inputs = tokenizer(prompt, return_tensors="pt", padding=True)
-        inputs = {k: v.to(_first_device) for k, v in inputs.items()}
-
+        inputs = _to_device(inputs, _first_device)
         with torch.no_grad():
             output = model.generate(
                 **inputs,
                 max_new_tokens=max_tokens,
-                temperature=temperature,
+                temperature=float(temperature),
                 top_p=0.95,
                 top_k=50,
                 do_sample=True,
                 pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.eos_token_id
+                eos_token_id=tokenizer.eos_token_id,
             )
-
         generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-        resposta = generated_text.replace(prompt, "", 1).strip()
-        logger.info("Resposta final retornada", extra={"resposta": resposta})
+        resposta = generated_text
+        if generated_text.startswith(prompt):
+            resposta = generated_text[len(prompt):].lstrip()
+        logger.info("Resposta final retornada", extra={"resposta": resposta[:500] + ("..." if len(resposta) > 500 else "")})
         return resposta
     except Exception as e:
         logger.exception("Erro durante geração de resposta: %s", str(e))
