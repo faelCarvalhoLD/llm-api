@@ -83,26 +83,65 @@ def _load_model():
 model = _load_model()
 model.eval()
 
+# ============================================================
+# PATCH: normalização robusta de devices
+# ============================================================
+
+def _normalize_device(dev):
+    if isinstance(dev, torch.device):
+        return dev
+
+    if isinstance(dev, int):
+        if torch.cuda.is_available():
+            return torch.device(f"cuda:{dev}")
+        return torch.device("cpu")
+
+    if isinstance(dev, str):
+        s = dev.strip().lower()
+        if s in {"disk", "meta", "offload"}:
+            return torch.device("cpu")
+        if s.isdigit():
+            if torch.cuda.is_available():
+                return torch.device(f"cuda:{s}")
+            return torch.device("cpu")
+        if s == "cuda" and torch.cuda.is_available():
+            return torch.device("cuda:0")
+        if s.startswith("cuda"):
+            return torch.device(s if torch.cuda.is_available() else "cpu")
+        if s == "cpu":
+            return torch.device("cpu")
+        return torch.device("cpu")
+
+    return torch.device("cpu")
+
+
 def _first_device_from_map(m):
     dmap = getattr(m, "hf_device_map", None)
     if not dmap:
-        return device
+        return _normalize_device("cuda:0" if torch.cuda.is_available() else "cpu")
+
     for name, dev in dmap.items():
         if "embed_tokens" in name or "wte" in name:
-            return dev
-    return next(iter(dmap.values()))
+            return _normalize_device(dev)
+
+    for dev in dmap.values():
+        if str(dev).lower() not in {"disk", "meta", "offload"}:
+            return _normalize_device(dev)
+
+    return torch.device("cpu")
+
 
 _first_device = _first_device_from_map(model)
-logger.info("Primeiro device para inputs: %s", _first_device)
+logger.info("Primeiro device para inputs: %s", str(_first_device))
+
 
 def _to_device(batch, dev):
-    if isinstance(dev, str):
-        tdev = torch.device(dev)
-    elif isinstance(dev, torch.device):
-        tdev = dev
-    else:
-        tdev = torch.device(str(dev))
-    return {k: v.to(tdev) if hasattr(v, "to") else v for k, v in batch.items()}
+    tdev = _normalize_device(dev)
+    return {k: (v.to(tdev) if hasattr(v, "to") else v) for k, v in batch.items()}
+
+# ============================================================
+# Função principal de geração
+# ============================================================
 
 def generate_response(prompt: str, max_tokens: int = 256, temperature: float = 0.7) -> str:
     logger.info("Recebido prompt", extra={"prompt": prompt[:500] + ("..." if len(prompt) > 500 else "")})
