@@ -162,7 +162,7 @@ def generate_response(prompt: str, max_tokens: int = 256, temperature: float = 0
         generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
         resposta = generated_text
         if generated_text.startswith(prompt):
-            resposta = generated_text[len(prompt):].lstrip()
+            resposta = generated_text.strip()
         logger.info("Resposta final retornada", extra={"resposta": resposta[:500] + ("..." if len(resposta) > 500 else "")})
         return resposta
     except Exception as e:
