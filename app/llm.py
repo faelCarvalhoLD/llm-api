@@ -146,10 +146,11 @@ def _to_device(batch, dev):
 def generate_response(prompt: str, max_tokens: int = 256, temperature: float = 0.7) -> str:
     logger.info("Recebido prompt", extra={"prompt": prompt[:500] + ("..." if len(prompt) > 500 else "")})
     try:
-        inputs = tokenizer(prompt, return_tensors="pt", padding=True)
+        inputs = tokenizer(prompt, return_tensors="pt")
         inputs = _to_device(inputs, _first_device)
+
         with torch.no_grad():
-            output = model.generate(
+            output_ids = model.generate(
                 **inputs,
                 max_new_tokens=max_tokens,
                 temperature=float(temperature),
@@ -159,12 +160,14 @@ def generate_response(prompt: str, max_tokens: int = 256, temperature: float = 0
                 pad_token_id=tokenizer.pad_token_id,
                 eos_token_id=tokenizer.eos_token_id,
             )
-        generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-        resposta = generated_text
-        if generated_text.startswith(prompt):
-            resposta = generated_text.strip()
+
+        input_len = inputs["input_ids"].shape[1]
+        new_token_ids = output_ids[0][input_len:]
+        resposta = tokenizer.decode(new_token_ids, skip_special_tokens=True).strip()
+
         logger.info("Resposta final retornada", extra={"resposta": resposta[:500] + ("..." if len(resposta) > 500 else "")})
         return resposta
     except Exception as e:
         logger.exception("Erro durante geração de resposta: %s", str(e))
         raise
+
