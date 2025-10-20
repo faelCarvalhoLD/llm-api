@@ -153,21 +153,51 @@ def generate_response(prompt: str, max_tokens: int = 256, temperature: float = 0
             output_ids = model.generate(
                 **inputs,
                 max_new_tokens=max_tokens,
+                min_new_tokens=min(16, max_tokens),  # <<-- força saída
                 temperature=float(temperature),
                 top_p=0.95,
                 top_k=50,
                 do_sample=True,
                 pad_token_id=tokenizer.pad_token_id,
                 eos_token_id=tokenizer.eos_token_id,
+                use_cache=True,
             )
 
-        input_len = inputs["input_ids"].shape[1]
-        new_token_ids = output_ids[0][input_len:]
-        resposta = tokenizer.decode(new_token_ids, skip_special_tokens=True).strip()
+        input_len = int(inputs["input_ids"].shape[1])
+        output_len = int(output_ids.shape[1])
+        logger.info("Tamanhos", extra={"input_len": input_len, "output_len": output_len})
 
-        logger.info("Resposta final retornada", extra={"resposta": resposta[:500] + ("..." if len(resposta) > 500 else "")})
+        if output_len > input_len:
+            new_token_ids = output_ids[0][input_len:]
+            resposta = tokenizer.decode(new_token_ids, skip_special_tokens=True).strip()
+        else:
+            resposta = tokenizer.decode(output_ids[0], skip_special_tokens=True).strip()
+
+        if not resposta:
+            logger.warning("Resposta vazia; tentando retry sem eos_token_id")
+            with torch.no_grad():
+                output_ids2 = model.generate(
+                    **inputs,
+                    max_new_tokens=min(64, max_tokens),
+                    min_new_tokens=min(16, max_tokens),
+                    temperature=float(temperature),
+                    top_p=0.95,
+                    top_k=50,
+                    do_sample=True,
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=None,
+                    use_cache=True,
+                )
+            if output_ids2.shape[1] > input_len:
+                resposta = tokenizer.decode(output_ids2[0][input_len:], skip_special_tokens=True).strip()
+            else:
+                resposta = tokenizer.decode(output_ids2[0], skip_special_tokens=True).strip()
+
+        logger.info("Resposta final retornada", extra={
+            "resposta": resposta[:500] + ("..." if len(resposta) > 500 else "")
+        })
         return resposta
+
     except Exception as e:
         logger.exception("Erro durante geração de resposta: %s", str(e))
         raise
-
